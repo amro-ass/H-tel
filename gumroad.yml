@@ -1,0 +1,41 @@
+name: Update Gumroad products
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/gumroad.yml']
+permissions:
+  contents: write
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Fetch products
+        env:
+          GUMROAD_TOKEN: ${{ secrets.GUMROAD_TOKEN }}
+        run: |
+          node -e "
+          const fs=require('fs');
+          (async()=>{
+            const r=await fetch('https://api.gumroad.com/v2/products?access_token='+encodeURIComponent(process.env.GUMROAD_TOKEN));
+            const j=await r.json();
+            if(!j.success){console.error('Gumroad error:',j.message);process.exit(1)}
+            const products=j.products.filter(p=>p.published!==false).map(p=>({
+              id:p.id,name:p.name,description:p.description||'',
+              image:p.thumbnail_url||p.preview_url||(p.covers&&p.covers[0])||'',
+              price:p.formatted_price,priceValue:(p.price||0)/100,currency:p.currency,
+              url:p.short_url,tags:p.tags||[],sales:p.sales_count||0}));
+            fs.writeFileSync('products.json',JSON.stringify({products},null,1));
+            console.log('Saved',products.length,'products');
+          })();
+          "
+      - name: Commit
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add products.json
+          git diff --staged --quiet || (git commit -m "Update products" && git push)
